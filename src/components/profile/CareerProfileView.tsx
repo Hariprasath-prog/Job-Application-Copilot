@@ -9,9 +9,11 @@ import {
   Plus,
   Trash2,
   Save,
-  Link
+  Link,
+  Database
 } from 'lucide-react';
 import { UserProfile, Education, Project } from '../../types/profile';
+import { KnowledgeBaseView } from '../knowledge/KnowledgeBaseView';
 
 interface CareerProfileViewProps {
   profile: UserProfile;
@@ -21,7 +23,7 @@ interface CareerProfileViewProps {
 export const CareerProfileView: React.FC<CareerProfileViewProps> = ({ profile, onSaveProfile }) => {
   const [form, setForm] = useState<UserProfile>({ ...profile });
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'personal' | 'education' | 'skills' | 'projects' | 'preferences'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'education' | 'skills' | 'projects' | 'preferences' | 'documents'>('personal');
 
   const handleSave = () => {
     onSaveProfile({ ...form, updatedAt: new Date().toISOString() });
@@ -74,7 +76,8 @@ export const CareerProfileView: React.FC<CareerProfileViewProps> = ({ profile, o
           { id: 'education', label: 'Education', icon: <GraduationCap size={16} /> },
           { id: 'skills', label: 'Skills Matrix', icon: <Code2 size={16} /> },
           { id: 'projects', label: 'Projects & Repos', icon: <FolderGit2 size={16} /> },
-          { id: 'preferences', label: 'Career Preferences', icon: <Briefcase size={16} /> }
+          { id: 'preferences', label: 'Career Preferences', icon: <Briefcase size={16} /> },
+          { id: 'documents', label: 'Knowledge Base', icon: <Database size={16} /> }
         ].map(t => {
           const isActive = activeTab === t.id;
           return (
@@ -550,6 +553,13 @@ export const CareerProfileView: React.FC<CareerProfileViewProps> = ({ profile, o
                 }}
               />
             </div>
+          </div>
+        )}
+
+        {/* TAB 6: Knowledge Base & Document Repository */}
+        {activeTab === 'documents' && (
+          <div style={{ marginTop: '-10px' }}>
+            <KnowledgeBaseView />
           </div>
         )}
       </div>

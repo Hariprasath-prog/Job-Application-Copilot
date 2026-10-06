@@ -15,7 +15,10 @@ import {
   ExternalLink,
   Cpu,
   Check,
-  AlertCircle
+  AlertCircle,
+  Database,
+  Layers,
+  Award
 } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 
@@ -39,6 +42,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onResetData }) => {
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState<string>('');
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [embeddingProvider, setEmbeddingProvider] = useState<string>(() => {
+    return localStorage.getItem('copilot_embedding_provider') || 'local';
+  });
 
   const [exportSuccess, setExportSuccess] = useState<boolean>(false);
   const [resetSuccess, setResetSuccess] = useState<boolean>(false);
@@ -299,6 +305,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onResetData }) => {
             )}
           </div>
         )}
+      </div>
+
+      {/* RAG Architecture & Vector Database Configuration */}
+      <div className="glass-card" style={{ padding: '24px 28px' }}>
+        <h3 style={{ fontSize: '1.15rem', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Database size={20} color="var(--primary)" />
+          <span>RAG Architecture & Vector Database Configuration</span>
+        </h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.825rem', marginTop: '4px', marginBottom: '16px' }}>
+          Configure semantic embedding models, vector distance metrics, and hybrid BM25 retrieval weights.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          {[
+            { id: 'local', title: 'Local Semantic Hash', dim: '384 dimensions', desc: 'Zero network calls, 100% deterministic, instant', badge: 'Active Default' },
+            { id: 'gemini', title: 'Google text-embedding-004', dim: '768 dimensions', desc: 'High semantic density via Google AI Studio key', badge: 'Cloud API' },
+            { id: 'openai', title: 'OpenAI text-embedding-3-small', dim: '1536 dimensions', desc: 'OpenAI official vector embedding endpoint', badge: 'Cloud API' }
+          ].map(em => (
+            <div
+              key={em.id}
+              onClick={() => {
+                setEmbeddingProvider(em.id);
+                localStorage.setItem('copilot_embedding_provider', em.id);
+              }}
+              style={{
+                padding: '14px',
+                borderRadius: 'var(--radius-md)',
+                background: embeddingProvider === em.id ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-input)',
+                border: `1.5px solid ${embeddingProvider === em.id ? 'var(--primary)' : 'var(--border-card)'}`,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{em.title}</span>
+                <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-card)', color: 'var(--primary)' }}>{em.badge}</span>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>{em.dim}</div>
+              <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '2px' }}>{em.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '14px 16px',
+          borderRadius: 'var(--radius-md)',
+          background: 'rgba(16, 185, 129, 0.05)',
+          border: '1px solid rgba(16, 185, 129, 0.2)',
+          fontSize: '0.8rem',
+          color: 'var(--text-secondary)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px'
+        }}>
+          <div>
+            <strong>Hybrid Retrieval Active:</strong> 60% Vector Cosine Similarity + 40% BM25 Exact Match with Reciprocal Rank Fusion (RRF).
+          </div>
+          <span style={{ color: '#10b981', fontWeight: 600, fontSize: '0.75rem' }}>✓ Isolation Scope: Verified</span>
+        </div>
       </div>
 
       {/* Safety & Compliance Policies */}

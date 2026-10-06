@@ -1,4 +1,5 @@
 import { JobMatchBreakdown } from './job';
+import { Citation, RagDebugTrace, ConflictNotice } from './rag';
 
 export type AgentRole = 'user' | 'assistant' | 'system' | 'tool';
 
@@ -28,8 +29,11 @@ export interface AgentMessage {
   steps?: AgentStep[];
   toolCalls?: AgentToolCall[];
   matchSummary?: JobMatchBreakdown;
+  citations?: Citation[];
+  ragTrace?: RagDebugTrace;
+  conflictNotices?: ConflictNotice[];
   actionCard?: {
-    type: 'job_recommendation' | 'resume_tailored' | 'application_prepared' | 'followup_ready' | 'hitl_approval';
+    type: 'job_recommendation' | 'resume_tailored' | 'application_prepared' | 'followup_ready' | 'hitl_approval' | 'rag_evidence_card';
     payload: any;
   };
 }

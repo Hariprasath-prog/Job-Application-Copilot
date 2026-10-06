@@ -10,7 +10,8 @@ import {
   ShieldCheck,
   Briefcase,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Database
 } from 'lucide-react';
 import { UserProfile } from '../../types/profile';
 import { JobListing } from '../../types/job';
@@ -57,6 +58,9 @@ export const ResumeStudioView: React.FC<ResumeStudioViewProps> = ({
               </span>
               <span className="badge badge-verified" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <ShieldCheck size={12} /> Anti-Hallucination Policy Active
+              </span>
+              <span className="badge badge-verified" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Database size={12} /> RAG Grounded Chunks
               </span>
             </div>
             <h1 style={{ fontSize: '1.6rem', margin: 0 }}>Resume Studio & Truthful Tailoring</h1>

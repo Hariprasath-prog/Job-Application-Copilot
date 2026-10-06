@@ -8,6 +8,10 @@ import { generateInterviewPrep } from '../services/interviewPrepService';
 import { analyzeSkillGaps } from '../services/skillGapService';
 import { detectDueFollowUps } from '../services/followUpService';
 import { ApplicationStage, ApplicationRecord } from '../types/application';
+import { DocumentType } from '../types/rag';
+import { HybridRetriever } from '../services/rag/hybridRetriever';
+import { Reranker } from '../services/rag/reranker';
+import { VectorStoreManager } from '../services/rag/vectorStore';
 
 export interface ToolDefinition {
   name: string;
@@ -167,7 +171,6 @@ export const AgentTools: Record<string, ToolDefinition> = {
       app.stage = input.stage;
       if (input.stage === 'Applied' && !app.dateApplied) {
         app.dateApplied = input.dateApplied || new Date().toISOString();
-        // Schedule follow-up in 7 days
         const fDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         app.followUpDate = fDate.toISOString().split('T')[0];
         app.followUpStatus = 'Pending';
@@ -222,6 +225,115 @@ export const AgentTools: Record<string, ToolDefinition> = {
       const allJobs = StorageService.getJobs();
       const analysis = analyzeSkillGaps(profile, allJobs);
       return analysis.learningRoadmap;
+    }
+  },
+
+  // ==================== SECTION 23 & 24: RAG SPECIFIC TOOLS ====================
+
+  /**
+   * Universal knowledge base search with session-derived user scoping and hybrid ranking
+   */
+  search_knowledge_base: {
+    name: 'search_knowledge_base',
+    description: 'Search across all indexed verified documents with hybrid vector + BM25 keyword retrieval.',
+    execute: async (input: { query: string; documentTypes?: DocumentType[]; topK?: number; jobId?: string }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const filter = {
+        userId: currentUserId,
+        documentTypes: input.documentTypes,
+        jobId: input.jobId
+      };
+      const candidates = await HybridRetriever.retrieve(input.query, filter, { topMergedK: input.topK || 10 });
+      return Reranker.rerank(input.query, candidates, { targetJobId: input.jobId, topK: input.topK || 8 });
+    }
+  },
+
+  /**
+   * Retrieves exclusively candidate-owned documents (Resume, Projects, Certificates, Profile)
+   */
+  retrieve_user_documents: {
+    name: 'retrieve_user_documents',
+    description: 'Retrieve user-provided private career documents (Resume, Project architecture specs, Certificates).',
+    execute: async (input: { query: string; topK?: number }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const filter = {
+        userId: currentUserId,
+        documentTypes: ['USER_RESUME', 'USER_PROJECT', 'USER_CERTIFICATE', 'USER_PROFILE'] as DocumentType[]
+      };
+      const candidates = await HybridRetriever.retrieve(input.query, filter, { topMergedK: input.topK || 8 });
+      return Reranker.rerank(input.query, candidates, { intent: 'RESUME_ANALYSIS', topK: input.topK || 5 });
+    }
+  },
+
+  /**
+   * Retrieves official job description and requirements for a given job
+   */
+  retrieve_job_context: {
+    name: 'retrieve_job_context',
+    description: 'Retrieve official job description chunks, required qualifications, and compensation for a role.',
+    execute: async (input: { jobId: string; query?: string }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const q = input.query || 'required qualifications preferred skills responsibilities eligibility';
+      const filter = {
+        userId: currentUserId,
+        jobId: input.jobId,
+        documentTypes: ['JOB_DESCRIPTION'] as DocumentType[]
+      };
+      const candidates = await HybridRetriever.retrieve(q, filter, { topMergedK: 10 });
+      return Reranker.rerank(q, candidates, { targetJobId: input.jobId, topK: 6 });
+    }
+  },
+
+  /**
+   * Retrieves verified company culture and hiring process information
+   */
+  retrieve_company_context: {
+    name: 'retrieve_company_context',
+    description: 'Retrieve verified official company information, hiring process stages, and engineering culture.',
+    execute: async (input: { company: string; query?: string }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const q = `${input.company} ${input.query || 'engineering culture hiring process interview stages'}`;
+      const filter = {
+        userId: currentUserId,
+        company: input.company,
+        documentTypes: ['COMPANY_INFORMATION', 'JOB_DESCRIPTION'] as DocumentType[]
+      };
+      const candidates = await HybridRetriever.retrieve(q, filter, { topMergedK: 8 });
+      return Reranker.rerank(q, candidates, { intent: 'COMPANY_QUERY', topK: 5 });
+    }
+  },
+
+  /**
+   * Retrieves interview guides, DSA problem patterns, and STAR interview prompts
+   */
+  retrieve_interview_material: {
+    name: 'retrieve_interview_material',
+    description: 'Retrieve technical interview guides, Java/DSA pattern prep, and STAR behavioral frameworks.',
+    execute: async (input: { query: string; topK?: number }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const filter = {
+        userId: currentUserId,
+        documentTypes: ['INTERVIEW_GUIDE'] as DocumentType[]
+      };
+      const candidates = await HybridRetriever.retrieve(input.query, filter, { topMergedK: input.topK || 6 });
+      return Reranker.rerank(input.query, candidates, { intent: 'INTERVIEW_PREPARATION', topK: input.topK || 4 });
+    }
+  },
+
+  /**
+   * Retrieves learning resources and roadmaps to bridge skill gaps
+   */
+  retrieve_learning_resources: {
+    name: 'retrieve_learning_resources',
+    description: 'Retrieve structured learning resources, transition roadmaps, and cheat sheets.',
+    execute: async (input: { skillOrTopic: string; topK?: number }) => {
+      const currentUserId = StorageService.getProfile().id;
+      const filter = {
+        userId: currentUserId,
+        documentTypes: ['LEARNING_RESOURCE', 'CAREER_GUIDE'] as DocumentType[]
+      };
+      const candidates = await HybridRetriever.retrieve(input.skillOrTopic, filter, { topMergedK: input.topK || 6 });
+      return Reranker.rerank(input.skillOrTopic, candidates, { intent: 'SKILL_GAP', topK: input.topK || 4 });
     }
   }
 };

@@ -10,7 +10,8 @@ import {
   Bot,
   BarChart3,
   Settings,
-  Flame
+  Flame,
+  Database
 } from 'lucide-react';
 
 export type NavTab =
@@ -18,6 +19,7 @@ export type NavTab =
   | 'jobs'
   | 'applications'
   | 'resume'
+  | 'knowledge'
   | 'profile'
   | 'skillgaps'
   | 'interview'
@@ -43,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'jobs', label: 'Job Discovery', icon: <Briefcase size={18} />, badge: jobsCount },
     { id: 'applications', label: 'Applications', icon: <KanbanSquare size={18} />, badge: applicationsCount },
     { id: 'resume', label: 'Resume Studio', icon: <FileText size={18} /> },
+    { id: 'knowledge', label: 'Knowledge Base', icon: <Database size={18} />, badge: 'RAG' },
     { id: 'profile', label: 'Career Profile', icon: <UserCheck size={18} /> },
     { id: 'skillgaps', label: 'Skill Gaps & Map', icon: <TrendingUp size={18} /> },
     { id: 'interview', label: 'Interview Prep', icon: <BrainCircuit size={18} /> },

@@ -24,6 +24,7 @@ import { SkillGapView } from './components/skillgap/SkillGapView';
 import { InterviewPrepView } from './components/interview/InterviewPrepView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { KnowledgeBaseView } from './components/knowledge/KnowledgeBaseView';
 
 export const App: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile>(StorageService.getProfile());
@@ -278,6 +279,10 @@ export const App: React.FC = () => {
               targetJob={targetTailorJob}
               onUpdateProfile={handleUpdateProfile}
             />
+          )}
+
+          {currentTab === 'knowledge' && (
+            <KnowledgeBaseView />
           )}
 
           {currentTab === 'profile' && (

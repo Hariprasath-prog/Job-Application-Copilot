@@ -11,10 +11,17 @@ import {
   Loader2,
   X,
   FileText,
-  Briefcase
+  Briefcase,
+  Cpu,
+  Layers,
+  Bookmark,
+  AlertTriangle
 } from 'lucide-react';
 import { AgentMessage, AgentStep, HumanInTheLoopRequest } from '../../types/agent';
+import { Citation, RagDebugTrace } from '../../types/rag';
 import { AgentOrchestrator } from '../../agent/agentOrchestrator';
+import { CitationPreviewModal } from '../rag/CitationPreviewModal';
+import { RagDebugModal } from '../rag/RagDebugModal';
 
 interface AgentChatDrawerProps {
   isOpen: boolean;
@@ -35,17 +42,22 @@ export const AgentChatDrawer: React.FC<AgentChatDrawerProps> = ({
     {
       id: 'welcome',
       sender: 'agent',
-      text: `Hello Hari! I'm your **Job Application Copilot**.
+      text: `Hello Hari! I'm your **RAG-Powered Job Application Copilot**.
 
-I can evaluate job listings, tailor your resume with strict truthfulness verification, draft grounded cover letters, monitor follow-up deadlines, and prepare interview questions.
+I retrieve verified facts from your uploaded resume, project architecture specifications, official company job descriptions, and career preparation guides before generating answers.
 
-What would you like to accomplish today?`,
+Every factual recommendation is grounded in evidence with clickable citations. How can I assist your career journey today?`,
       timestamp: new Date().toISOString()
     }
   ]);
   const [input, setInput] = useState<string>('');
   const [activeSteps, setActiveSteps] = useState<AgentStep[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // Citation & Debug Trace modals
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [activeTrace, setActiveTrace] = useState<RagDebugTrace | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -133,10 +145,10 @@ What would you like to accomplish today?`,
             <Bot size={18} />
           </div>
           <div>
-            <h3 style={{ fontSize: '1rem', margin: 0 }}>Job Application Copilot</h3>
+            <h3 style={{ fontSize: '1rem', margin: 0 }}>RAG Career Copilot</h3>
             <span style={{ fontSize: '0.725rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
-              Reasoning Engine Ready
+              Hybrid Retrieval + Grounding Online
             </span>
           </div>
         </div>
@@ -163,11 +175,12 @@ What would you like to accomplish today?`,
       }}>
         {[
           'Why is ABC Technologies ranked #1?',
+          'What programming languages are listed on my resume?',
+          'Which skills are required for ABC Technologies?',
+          'Does ABC Technologies provide accommodation?',
           'Tailor my resume for ABC Technologies',
-          'Apply for ABC Technologies',
-          'Follow up on ABC Technologies',
           'What skills should I learn?',
-          'Prepare interview questions for PhonePe'
+          'Prepare interview questions for ABC Technologies'
         ].map((prompt, i) => (
           <button
             key={i}
@@ -181,7 +194,7 @@ What would you like to accomplish today?`,
       </div>
 
       {/* Messages Feed */}
-      <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px' }}>
         {messages.map(msg => (
           <div
             key={msg.id}
@@ -195,7 +208,7 @@ What would you like to accomplish today?`,
             <div style={{
               display: 'flex',
               gap: '10px',
-              maxWidth: '85%',
+              maxWidth: '88%',
               flexDirection: msg.sender === 'user' ? 'row-reverse' : 'row'
             }}>
               <div style={{
@@ -215,17 +228,122 @@ What would you like to accomplish today?`,
               </div>
 
               <div style={{
-                padding: '12px 16px',
+                padding: '14px 16px',
                 borderRadius: 'var(--radius-md)',
                 background: msg.sender === 'user' ? 'var(--primary)' : 'var(--bg-input)',
                 color: msg.sender === 'user' ? '#ffffff' : 'var(--text-primary)',
                 fontSize: '0.875rem',
-                lineHeight: 1.5,
+                lineHeight: 1.55,
                 whiteSpace: 'pre-line',
                 border: '1px solid',
                 borderColor: msg.sender === 'user' ? 'transparent' : 'var(--border-card)'
               }}>
                 {msg.text}
+
+                {/* Conflict Notice Warning */}
+                {msg.conflictNotices && msg.conflictNotices.length > 0 && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '10px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'rgba(245, 158, 11, 0.1)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    color: '#f59e0b',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                      <AlertTriangle size={14} />
+                      <span>Conflicting Sources Identified</span>
+                    </div>
+                    {msg.conflictNotices.map((cf, i) => (
+                      <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-primary)' }}>
+                        • Prioritizing <strong>{cf.higherAuthoritySource}</strong> over {cf.lowerAuthoritySource}. {cf.resolutionNote}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Clickable Citations Chips */}
+                {msg.citations && msg.citations.length > 0 && (
+                  <div style={{
+                    marginTop: '14px',
+                    paddingTop: '10px',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Verified Grounded Citations (Click to inspect source)
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {msg.citations.map(cit => (
+                        <button
+                          key={cit.id}
+                          onClick={() => setActiveCitation(cit)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 9px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'rgba(99, 102, 241, 0.12)',
+                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                            color: '#818cf8',
+                            fontSize: '0.725rem',
+                            cursor: 'pointer',
+                            transition: 'all var(--transition-fast)'
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = 'rgba(99, 102, 241, 0.25)';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = 'rgba(99, 102, 241, 0.12)';
+                          }}
+                        >
+                          <Bookmark size={11} />
+                          <span>{cit.source}</span>
+                          <span style={{ opacity: 0.7 }}>({cit.section})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Developer Observability Trace Button */}
+                {msg.ragTrace && (
+                  <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => setActiveTrace(msg.ragTrace!)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '3px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'transparent',
+                        border: '1px solid var(--border-card)',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.7rem',
+                        cursor: 'pointer'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.color = 'var(--primary)';
+                        e.currentTarget.style.borderColor = 'var(--primary)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.color = 'var(--text-muted)';
+                        e.currentTarget.style.borderColor = 'var(--border-card)';
+                      }}
+                    >
+                      <Cpu size={12} />
+                      <span>Inspect RAG Pipeline Trace ({msg.ragTrace.latencyMs.total}ms)</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -239,10 +357,10 @@ What would you like to accomplish today?`,
                 fontSize: '0.75rem',
                 color: 'var(--text-muted)',
                 marginLeft: '40px',
-                maxWidth: '80%'
+                maxWidth: '85%'
               }}>
                 <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--text-secondary)' }}>
-                  Execution Trace:
+                  RAG Execution Pipeline:
                 </div>
                 {msg.steps.map((st, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
@@ -266,11 +384,11 @@ What would you like to accomplish today?`,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
-            maxWidth: '80%'
+            maxWidth: '85%'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontSize: '0.825rem', fontWeight: 600 }}>
               <Loader2 size={14} className="spin-animation" />
-              <span>Orchestrating agent reasoning...</span>
+              <span>Retrieving verified evidence & reranking...</span>
             </div>
 
             {activeSteps.map((st, i) => (
@@ -295,7 +413,7 @@ What would you like to accomplish today?`,
       }}>
         <input
           className="input-field"
-          placeholder="Ask a question or request an action..."
+          placeholder="Ask a factual career question or request resume tailoring..."
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSend()}
@@ -310,6 +428,18 @@ What would you like to accomplish today?`,
           <Send size={15} />
         </button>
       </div>
+
+      {/* Citation Preview Modal */}
+      <CitationPreviewModal
+        citation={activeCitation}
+        onClose={() => setActiveCitation(null)}
+      />
+
+      {/* RAG Developer Trace Inspector Modal */}
+      <RagDebugModal
+        trace={activeTrace}
+        onClose={() => setActiveTrace(null)}
+      />
     </div>
   );
 
@@ -323,7 +453,7 @@ What would you like to accomplish today?`,
       right: 0,
       top: '68px',
       bottom: 0,
-      width: '440px',
+      width: '460px',
       zIndex: 90,
       boxShadow: 'var(--shadow-lg)',
       animation: 'slideInRight 0.2s ease-out'

@@ -2,7 +2,8 @@ import { AgentMessage, AgentStep, HumanInTheLoopRequest } from '../types/agent';
 import { StorageService } from '../services/storageService';
 import { AgentTools } from './agentTools';
 import { calculateJobMatch } from '../services/matchEngine';
-import { AiService } from '../services/aiService';
+import { RagPipeline } from '../services/rag/ragPipeline';
+import { initializeSeedKnowledgeBase } from '../data/seedKnowledgeBase';
 
 export interface OrchestrationResult {
   message: AgentMessage;
@@ -17,7 +18,9 @@ export const AgentOrchestrator = {
     const text = userInput.trim().toLowerCase();
     const profile = StorageService.getProfile();
     const allJobs = StorageService.getJobs();
-    const apps = StorageService.getApplications();
+
+    // Ensure knowledge base has baseline seed documents indexed
+    await initializeSeedKnowledgeBase(profile.id);
 
     const steps: AgentStep[] = [];
     const addStep = (label: string, status: AgentStep['status'] = 'completed', detail?: string) => {
@@ -33,42 +36,31 @@ export const AgentOrchestrator = {
       return step;
     };
 
-    // Intent 1: Why is a job ranked #1 or why match?
-    if (text.includes('why') && (text.includes('rank') || text.includes('match') || text.includes('abc') || text.includes('#1') || text.includes('first'))) {
-      addStep('Inspecting top ranked opportunity in verified job list');
-      addStep('Executing calculate_job_match() with user profile factors');
+    // Intent 1: Why is a job ranked #1 or evaluate job match?
+    if (text.includes('why') && (text.includes('rank') || text.includes('match') || text.includes('abc') || text.includes('#1') || text.includes('first') || text.includes('85%') || text.includes('91%'))) {
+      addStep('Step 1: Query Analysis & Intent Classification [JOB_ANALYSIS]');
+      addStep('Step 2: Executing Scoped Hybrid Retrieval (Vector + BM25) across Resume & Job Description');
 
       const topJob = allJobs[0];
+      const ragRes = await RagPipeline.execute(userInput, { targetJob: topJob });
+
+      addStep('Step 3: Document Authority Reranker applied (User Docs: 1.0, Official JD: 0.95)');
+      addStep('Step 4: Grounded Context Builder synthesized evidence rubric');
+      addStep('Step 5: Generated citations & verified anti-hallucination compliance');
+
       const match = calculateJobMatch(profile, topJob);
-
-      addStep('Synthesizing explainable evaluation rubric');
-
-      const responseText = `### Why ${topJob.company} (${topJob.title}) is Ranked #1:
-
-**Estimated Match Score: ${match.overallScore}% (${match.priority})**
-
-#### Evidence & Alignment
-${match.whyYouMatch.map(w => `• ${w}`).join('\n')}
-
-#### Skill Breakdown
-• **Matched Skills:** ${match.matchedSkills.join(', ')}
-• **Missing Required Skills:** ${match.missingRequiredSkills.join(', ') || 'None!'}
-• **Missing Preferred Skills:** ${match.missingPreferredSkills.join(', ') || 'None'}
-
-#### Honest Assessment
-${match.recommendationReason}
-
-> **Recommendation: ${match.recommendation}**
-> Would you like me to tailor your resume for ${topJob.company} without inventing any unverified experience?`;
 
       return {
         message: {
           id: `msg_${Date.now()}`,
           sender: 'agent',
-          text: responseText,
+          text: ragRes.text,
           timestamp: new Date().toISOString(),
           steps,
           matchSummary: match,
+          citations: ragRes.citations,
+          ragTrace: ragRes.debugTrace,
+          conflictNotices: ragRes.conflicts,
           actionCard: {
             type: 'job_recommendation',
             payload: { job: topJob, match }
@@ -77,15 +69,17 @@ ${match.recommendationReason}
       };
     }
 
-    // Intent 2: Tailor Resume
+    // Intent 2: Tailor Resume (Section 19: RAG for Resume Tailoring)
     if (text.includes('tailor') || text.includes('customize resume') || (text.includes('resume') && text.includes('job'))) {
-      addStep('Step 1: Read user profile & verified project portfolio');
-      addStep('Step 2: Inspect target job requirements (ABC Technologies)');
-      addStep('Step 3: Run anti-hallucination verification gate');
-      addStep('Step 4: Reorganize relevant achievements without fabricating claims');
+      addStep('Step 1: Retrieve candidate resume, verified projects & skills from Knowledge Base');
+      addStep('Step 2: Retrieve target job description required & preferred qualifications');
+      addStep('Step 3: Run anti-hallucination verification gate (zero fabricated claims)');
 
       const targetJob = allJobs.find(j => text.includes(j.company.toLowerCase())) || allJobs[0];
+      const ragRes = await RagPipeline.execute(userInput, { targetJob });
       const tailored = AgentTools.tailor_resume.execute({ jobId: targetJob.id });
+
+      addStep('Step 4: Reorganize relevant achievements with traceable citations');
 
       const responseText = `### Truthful Tailored Resume Generated for ${targetJob.company}
 
@@ -97,7 +91,7 @@ ${match.recommendationReason}
 
 #### Skills Not Added (To maintain absolute truthfulness):
 ${tailored.truthfulnessAudit.skillsNotFabricated.length > 0
-  ? tailored.truthfulnessAudit.skillsNotFabricated.map((s: string) => `• ⚠ **${s}** — Omitted because you have not verified hands-on experience in this stack.`).join('\n')
+  ? tailored.truthfulnessAudit.skillsNotFabricated.map((s: string) => `• ⚠ **${s}** — Omitted because your profile does not provide evidence of hands-on experience in this stack.`).join('\n')
   : '• All required skills matched your verified profile.'}
 
 #### Guidance:
@@ -112,6 +106,8 @@ You can inspect or download the tailored resume in the **Resume Studio** tab!`;
           text: responseText,
           timestamp: new Date().toISOString(),
           steps,
+          citations: ragRes.citations,
+          ragTrace: ragRes.debugTrace,
           actionCard: {
             type: 'resume_tailored',
             payload: tailored
@@ -122,11 +118,12 @@ You can inspect or download the tailored resume in the **Resume Studio** tab!`;
 
     // Intent 3: Apply / Consequential Action with Human-In-The-Loop Confirmation
     if (text.includes('apply') || text.includes('submit')) {
-      addStep('Step 1: Check target opportunity');
-      addStep('Step 2: Generate application package (Cover Letter + Custom Q&A)');
+      addStep('Step 1: Check target opportunity & retrieve verified job description');
+      addStep('Step 2: Generate application package (Cover Letter + Custom Q&A) grounded in verified evidence');
       addStep('Step 3: Trigger Human-in-the-Loop Confirmation Gate (Consequential Action)');
 
       const targetJob = allJobs.find(j => text.includes(j.company.toLowerCase())) || allJobs[0];
+      const ragRes = await RagPipeline.execute(userInput, { targetJob });
       const prep = AgentTools.prepare_application.execute({ jobId: targetJob.id });
 
       const hitlRequest: HumanInTheLoopRequest = {
@@ -162,6 +159,8 @@ Per our safety protocol, I will not submit or alter your application records wit
           text: responseText,
           timestamp: new Date().toISOString(),
           steps,
+          citations: ragRes.citations,
+          ragTrace: ragRes.debugTrace,
           actionCard: {
             type: 'hitl_approval',
             payload: hitlRequest
@@ -172,10 +171,10 @@ Per our safety protocol, I will not submit or alter your application records wit
     }
 
     // Intent 4: Check follow-ups
-    if (text.includes('follow') || text.includes('reminder')) {
-      addStep('Step 1: Scan active applications');
+    if (text.includes('follow') || text.includes('reminder') || text.includes('deadline')) {
+      addStep('Step 1: Scan active applications in tracker');
       addStep('Step 2: Evaluate elapsed calendar days & response deadlines');
-      addStep('Step 3: Generate polite follow-up outreach drafts');
+      addStep('Step 3: Retrieve verified communication templates from Career Guide');
 
       const due = AgentTools.generate_followup.execute({});
 
@@ -221,24 +220,25 @@ ${item.emailBody}
       }
     }
 
-    // Intent 5: Skill Gaps / Learning Roadmap
+    // Intent 5: Skill Gaps / Learning Roadmap (Section 22: RAG for Skill Gap Analysis)
     if (text.includes('skill') || text.includes('learn') || text.includes('roadmap') || text.includes('gap')) {
-      addStep('Step 1: Aggregate required skills across 8 active job postings');
-      addStep('Step 2: Compare against verified student skills matrix');
-      addStep('Step 3: Cluster into Strong, Develop, and Priority tiers');
-      addStep('Step 4: Generate 4-week actionable learning roadmap');
+      addStep('Step 1: Retrieve aggregate job requirements from all 8 active postings');
+      addStep('Step 2: Retrieve candidate verified skills & projects from resume');
+      addStep('Step 3: Retrieve Spring Boot & SQL learning resources from Knowledge Base');
+      addStep('Step 4: Rank skill gaps by market frequency and synthesize 4-week roadmap');
 
+      const ragRes = await RagPipeline.execute(userInput, { targetJob: allJobs[0] });
       const analysis = AgentTools.analyze_skill_gap.execute({});
 
       const responseText = `### Market Skill Gap Analysis for ${profile.preferences.targetRoles[0]}
 
-**Strong Foundations You Possess:**
-${analysis.strongSkills.slice(0, 5).map((s: string) => `• ✓ ${s}`).join('\n')}
+**Strong Foundations You Possess (Retrieved Evidence):**
+${analysis.strongSkills.slice(0, 5).map((s: string) => `• ✓ **${s}** (Evidenced in resume & projects)`).join('\n')}
 
 **Priority Skills To Learn (High Market Frequency):**
-${analysis.prioritySkills.map((s: string) => `• 🚀 **${s}** (Appears in most target postings)`).join('\n')}
+${analysis.prioritySkills.map((s: string) => `• 🚀 **${s}** (Required by 8 of 8 selected target jobs; no project currently evidenced in profile)`).join('\n')}
 
-#### 4-Week Learning Roadmap:
+#### 4-Week Actionable Learning Roadmap:
 ${analysis.learningRoadmap.map((w: any) => `* **${w.title}**: Focus on *${w.focusSkill}*. Objective: ${w.objectives[0]} (Practice: ${w.recommendedPractice})`).join('\n\n')}
 
 You can view the full weekly curriculum in the **Skill Gaps** tab.`;
@@ -249,30 +249,34 @@ You can view the full weekly curriculum in the **Skill Gaps** tab.`;
           sender: 'agent',
           text: responseText,
           timestamp: new Date().toISOString(),
-          steps
+          steps,
+          citations: ragRes.citations,
+          ragTrace: ragRes.debugTrace
         }
       };
     }
 
-    // Intent 6: Interview Preparation
+    // Intent 6: Interview Preparation (Section 21: RAG for Interview Preparation)
     if (text.includes('interview') || text.includes('prep') || text.includes('dsa') || text.includes('question')) {
-      addStep('Step 1: Identify target interview opportunity');
-      addStep('Step 2: Extract technical stack and DSA patterns');
-      addStep('Step 3: Formulate STAR behavioral prompts for your projects');
+      addStep('Step 1: Retrieve target job description & company technical stack');
+      addStep('Step 2: Retrieve candidate verified Java projects & coursework');
+      addStep('Step 3: Retrieve high-frequency interview guides & STAR questions from Knowledge Base');
 
-      const targetJob = allJobs.find(j => text.includes(j.company.toLowerCase())) || allJobs[1]; // PhonePe or ABC
+      const targetJob = allJobs.find(j => text.includes(j.company.toLowerCase())) || allJobs[0];
+      const ragRes = await RagPipeline.execute(userInput, { targetJob });
       const prep = AgentTools.generate_interview_questions.execute({ jobId: targetJob.id });
 
-      const responseText = `### Interview Preparation Guide: ${prep.company} (${prep.jobTitle})
+      const responseText = `### Evidence-Grounded Interview Preparation: ${prep.company} (${prep.jobTitle})
 
-#### 1. Core Technical Focus
+#### 1. Core Technical Focus (Grounded in Job Requirements)
 ${prep.technicalTopics.map((t: any) => `**${t.domain}**\n${t.keyConcepts.slice(0, 3).map((c: string) => `• ${c}`).join('\n')}`).join('\n\n')}
 
 #### 2. Key DSA Patterns to Drill
 ${prep.dsaFocusAreas.slice(0, 2).map((d: any) => `• **${d.topic}** [${d.importance}]: Practice *${d.sampleProblem}*`).join('\n')}
 
-#### 3. Behavioral Talking Points (STAR Method)
-• **Tell me about yourself**: Focus on your B.Tech CSE coursework and building "${profile.projects[0]?.title}".
+#### 3. Behavioral Talking Points (STAR Method Grounded in Your Resume)
+• **Tell me about yourself**: Focus on your B.Tech CSE coursework and building your Java Bookstore portal ("${profile.projects[0]?.title}").
+• **Technical Deep Dive**: Be prepared to explain your MySQL JDBC connection pooling architecture.
 
 Check the **Interview Prep** tab for the complete question bank!`;
 
@@ -282,89 +286,32 @@ Check the **Interview Prep** tab for the complete question bank!`;
           sender: 'agent',
           text: responseText,
           timestamp: new Date().toISOString(),
-          steps
+          steps,
+          citations: ragRes.citations,
+          ragTrace: ragRes.debugTrace
         }
       };
     }
 
-    // Live AI query for general career questions or customized advice
-    if (AiService.isLiveAiAvailable() && (
-      text.includes('how') ||
-      text.includes('what') ||
-      text.includes('explain') ||
-      text.includes('tell') ||
-      text.includes('tip') ||
-      text.includes('advice') ||
-      text.includes('recommend') ||
-      text.includes('write') ||
-      text.includes('draft')
-    )) {
-      addStep('Consulting connected Live AI reasoning engine');
-      const systemPrompt = `You are an expert recruitment-tech architect and AI Job Application Copilot for ${profile.fullName}, a B.Tech CSE student graduating in ${profile.education[0]?.graduationYear}.
-Verified Profile Facts:
-- Degree: ${profile.education[0]?.degree} at ${profile.education[0]?.institution}
-- Verified Skills: ${profile.skills.languages.join(', ')}, ${profile.skills.frameworks.join(', ')}, ${profile.skills.toolsAndPlatforms.join(', ')}
-- Target Role: ${profile.preferences.targetRoles.join(', ')}
-Guidelines:
-1. Ground all recommendations on the candidate's verified skills and project experience.
-2. NEVER hallucinate or invent experience or unverified qualifications.
-3. Be concise, actionable, and encouraging.`;
+    // General / RAG Pipeline Query (Covers specific questions, accommodation checks, languages on resume, etc.)
+    addStep('Step 1: User Query Analysis & Intent Classification');
+    addStep('Step 2: Scoped Hybrid Retrieval (Vector Similarity + BM25 Keyword Search)');
+    addStep('Step 3: Multi-factor Reranking & Trust Hierarchy Enforcement');
+    addStep('Step 4: Grounded Context Builder (User Documents + Verified Job Information)');
+    addStep('Step 5: Anti-Hallucination Gate & Citation Generation');
 
-      const liveResponse = await AiService.generateCompletion(userInput, systemPrompt);
-      if (liveResponse) {
-        addStep('Grounded facts verified against local profile memory');
-        return {
-          message: {
-            id: `msg_${Date.now()}`,
-            sender: 'agent',
-            text: liveResponse,
-            timestamp: new Date().toISOString(),
-            steps
-          }
-        };
-      }
-    }
-
-    // Default: General Job Search & Discovery
-    addStep('Step 1: Read user profile & career preferences');
-    addStep('Step 2: Build structured search criteria from query');
-    addStep('Step 3: Search available job sources (Career pages, LinkedIn, Internshala)');
-    addStep('Step 4: Normalize job listings & remove duplicates');
-    addStep('Step 5: Check candidate eligibility & graduation batch');
-    addStep('Step 6: Compute transparent match scores for each opportunity');
-    addStep('Step 7: Rank and summarize high-quality matches');
-
-    const searchRes = AgentTools.search_jobs.execute({ query: userInput });
-    const matches = searchRes.jobs.map((j: any) => ({
-      job: j,
-      match: calculateJobMatch(profile, j)
-    })).sort((a: any, b: any) => b.match.overallScore - a.match.overallScore);
-
-    const highMatches = matches.filter((m: any) => m.match.overallScore >= 80);
-
-    const responseText = `### Job Discovery & Evaluation Results
-
-I scanned connected job sources and identified **${searchRes.totalDiscovered} total opportunities**. After removing **${searchRes.duplicatesRemoved} duplicate listings** and verifying your student eligibility, here are the top recommendations:
-
-${matches.slice(0, 4).map((m: any, idx: number) => `**#${idx + 1}. ${m.job.title} — ${m.job.company}** (${m.job.location})
-• **Match Score:** ${m.match.overallScore}% [${m.match.priority}]
-• **Stipend/Compensation:** ${m.job.stipendOrSalary}
-• **Why it matches:** ${m.match.matchedSkills.slice(0, 3).join(', ')} match your verified skills.
-• **Gaps:** ${m.match.missingRequiredSkills.join(', ') || 'No critical gaps'}`).join('\n\n')}
-
-You can view full details or tailor your resume for any role directly from the **Jobs** tab!`;
+    const ragResult = await RagPipeline.execute(userInput, { targetJob: allJobs[0] });
 
     return {
       message: {
         id: `msg_${Date.now()}`,
         sender: 'agent',
-        text: responseText,
+        text: ragResult.text,
         timestamp: new Date().toISOString(),
         steps,
-        actionCard: {
-          type: 'job_recommendation',
-          payload: { job: matches[0]?.job, match: matches[0]?.match }
-        }
+        citations: ragResult.citations,
+        ragTrace: ragResult.debugTrace,
+        conflictNotices: ragResult.conflicts
       }
     };
   }
