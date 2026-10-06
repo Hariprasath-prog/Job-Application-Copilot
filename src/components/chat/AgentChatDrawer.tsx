@@ -20,6 +20,8 @@ import {
 import { AgentMessage, AgentStep, HumanInTheLoopRequest } from '../../types/agent';
 import { Citation, RagDebugTrace } from '../../types/rag';
 import { AgentOrchestrator } from '../../agent/agentOrchestrator';
+import { AiService } from '../../services/aiService';
+import { StorageService } from '../../services/storageService';
 import { CitationPreviewModal } from '../rag/CitationPreviewModal';
 import { RagDebugModal } from '../rag/RagDebugModal';
 
@@ -42,23 +44,73 @@ export const AgentChatDrawer: React.FC<AgentChatDrawerProps> = ({
     {
       id: 'welcome',
       sender: 'agent',
-      text: `Hello Hari! I'm your **RAG-Powered Job Application Copilot**.
+      text: `Hello Hari! I'm your **RAG-Powered Job Application Copilot** (${AiService.getModelName()}).
 
-I retrieve verified facts from your uploaded resume, project architecture specifications, official company job descriptions, and career preparation guides before generating answers.
+I have indexed your verified career records and opportunities:
+• 📄 **Resume & Skills**: Verified in Core Java, C, Web Development, 8.7 CGPA.
+• 🏗️ **Verified Project**: "Online Bookstore & Inventory Portal" (Java Servlets, MySQL).
+• 🎯 **Top Matched Role**: **ABC Technologies** (Software Engineer Intern — 91% Match).
 
-Every factual recommendation is grounded in evidence with clickable citations. How can I assist your career journey today?`,
+What would you like to accomplish today?
+1. **Evaluate Job Fit**: Grounded match score breakdown with evidence citations.
+2. **Tailor Resume**: Highlight relevant coursework & projects without inventing experience.
+3. **Interview Prep**: Drill high-frequency DSA patterns and STAR behavioral questions.`,
       timestamp: new Date().toISOString()
     }
   ]);
   const [input, setInput] = useState<string>('');
   const [activeSteps, setActiveSteps] = useState<AgentStep[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isGeneratingGreeting, setIsGeneratingGreeting] = useState<boolean>(false);
 
   // Citation & Debug Trace modals
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [activeTrace, setActiveTrace] = useState<RagDebugTrace | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Dynamically generate personalized AI greeting from model on mount
+  useEffect(() => {
+    const fetchAiGreeting = async () => {
+      try {
+        const profile = StorageService.getProfile();
+        const jobs = StorageService.getJobs();
+        const topJob = jobs[0]?.company || 'ABC Technologies';
+        const aiGreeting = await AiService.generateWelcomeGreeting(profile, topJob);
+        if (aiGreeting) {
+          setMessages(prev => {
+            if (prev.length > 0 && prev[0].id === 'welcome') {
+              return [{ ...prev[0], text: aiGreeting }, ...prev.slice(1)];
+            }
+            return prev;
+          });
+        }
+      } catch (e) {
+        console.warn('Error loading dynamic AI greeting:', e);
+      }
+    };
+    fetchAiGreeting();
+  }, []);
+
+  const handleRegenerateGreeting = async () => {
+    setIsGeneratingGreeting(true);
+    try {
+      const profile = StorageService.getProfile();
+      const jobs = StorageService.getJobs();
+      const topJob = jobs[0]?.company || 'ABC Technologies';
+      const aiGreeting = await AiService.generateWelcomeGreeting(profile, topJob);
+      if (aiGreeting) {
+        setMessages(prev => {
+          if (prev.length > 0 && prev[0].id === 'welcome') {
+            return [{ ...prev[0], text: aiGreeting, timestamp: new Date().toISOString() }, ...prev.slice(1)];
+          }
+          return prev;
+        });
+      }
+    } finally {
+      setIsGeneratingGreeting(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -145,22 +197,71 @@ Every factual recommendation is grounded in evidence with clickable citations. H
             <Bot size={18} />
           </div>
           <div>
-            <h3 style={{ fontSize: '1rem', margin: 0 }}>RAG Career Copilot</h3>
-            <span style={{ fontSize: '0.725rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ fontSize: '1rem', margin: 0 }}>RAG Career Copilot</h3>
+              <span style={{
+                fontSize: '0.65rem',
+                padding: '2px 7px',
+                borderRadius: 'var(--radius-full)',
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: 'var(--primary)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                fontWeight: 600
+              }}>
+                {AiService.getModelName()}
+              </span>
+            </div>
+            <span style={{ fontSize: '0.725rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
               Hybrid Retrieval + Grounding Online
             </span>
           </div>
         </div>
 
-        {onClose && !isFullPage && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+            onClick={handleRegenerateGreeting}
+            disabled={isGeneratingGreeting}
+            title="Generate fresh greeting from AI model"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-card)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.725rem',
+              cursor: isGeneratingGreeting ? 'not-allowed' : 'pointer',
+              transition: 'all var(--transition-fast)'
+            }}
+            onMouseEnter={e => {
+              if (!isGeneratingGreeting) {
+                e.currentTarget.style.color = 'var(--primary)';
+                e.currentTarget.style.borderColor = 'var(--primary)';
+              }
+            }}
+            onMouseLeave={e => {
+              if (!isGeneratingGreeting) {
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border-card)';
+              }
+            }}
           >
-            <X size={18} />
+            <Sparkles size={12} color="var(--primary)" className={isGeneratingGreeting ? 'spin-slow' : ''} />
+            <span>{isGeneratingGreeting ? 'Generating...' : 'AI Greeting'}</span>
           </button>
-        )}
+
+          {onClose && !isFullPage && (
+            <button
+              onClick={onClose}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '6px' }}
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Quick Prompts Bar */}

@@ -74,7 +74,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onResetData }) => {
 
     try {
       if (provider === 'gemini') {
-        const resp = await fetch(
+        let resp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`,
           {
             method: 'POST',
@@ -84,6 +84,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onResetData }) => {
             })
           }
         );
+
+        if (!resp.ok && resp.status === 404) {
+          resp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey.trim()}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: 'Respond with "OK"' }] }]
+              })
+            }
+          );
+        }
 
         if (resp.ok) {
           setTestStatus('success');
